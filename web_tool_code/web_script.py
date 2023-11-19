@@ -12,6 +12,7 @@ import math
 from io import StringIO
 from io import BytesIO
 import sys
+import os
 #kic = 'KIC 3430893'
 
 def do_calculation(kic):
@@ -221,8 +222,10 @@ def do_calculation(kic):
 
         plot = plt.grid(axis = 'both', color='grey', ls = ':', linewidth=6)
 
+
         plt.savefig('plot2.jpg')
-        # Remove datasets
-        s.remove("kic_fits.fits")
+
+        os.remove("kic_fits.fits")
+
 
     return ruwe_list, primary_g_mag, g_mag_list, mag_diff_list, flux_ratio_list, percentage_flux, flux_contamination_total

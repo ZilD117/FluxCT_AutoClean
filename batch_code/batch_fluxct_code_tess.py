@@ -25,6 +25,7 @@ import astropy.units as u
 import math
 from ast import literal_eval
 import ssl
+import lightkurve
 
 try:
      _create_unverified_https_context = ssl._create_unverified_context
@@ -64,7 +65,9 @@ for i in identifiers:
     print('\n********** TESS ' + str(tess) + ' – Star Number ' + str(a) + ' **********') 
    
     # Searching for tpf with lightkurve
-    tpf = search_targetpixelfile('TESS ' + str(tess), author='TESS', cadence='short').download()
+    tpf = search_targetpixelfile('TIC ' + str(tess), author='SPOC', cadence='short').download()
+    if tpf ==None:
+        tpf = lightkurve.search_tesscut(tess).download()
     tpf_one = tpf[0]
     tpf_one.to_fits(plot_path + 'tess_' + str(tess) + '_fits.fits')
 
