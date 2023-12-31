@@ -16,7 +16,7 @@ Outputs:
 <li> A .csv file containing the output data from FluxCT. </li> 
 </ul>
 
-Any problems, concerns or suggestions should be sent to: jessica.s.stasik@vanderbilt.edu for the most timely review and reply. 
+Any problems, concerns or suggestions should be sent to: jessica.s.stasik@vanderbilt.edu and Zilin.Dong@vanderbilt.edu for the most timely review and reply. 
 
 Update: 
 >1. TESS datasets are enormously big, around 60MB (Way larger than 1~2 Mb, the size of Kepler dataset)
