@@ -3,7 +3,7 @@ This script allows the user to create the data products and plots from FluxCT fo
 
 INPUTS: 
  --> The user will need to specify the directory path for code and plots. 
- --> An input table of either TESS IDs with the format 'id' as the column name and comma separators. 
+ --> An input table of either KIC IDs with the format 'id' as the column name and comma separators. 
 
 OUTPUTS: 
  --> Downloaded fits file for the star from lightkurve to the plots directory. 
@@ -26,6 +26,10 @@ import math
 from ast import literal_eval
 import ssl
 import lightkurve
+import os
+import glob
+import shutil
+
 
 try:
      _create_unverified_https_context = ssl._create_unverified_context
@@ -37,14 +41,23 @@ else:
     ssl._create_default_https_context = _create_unverified_https_context
 
 # Paths and files 
-code_file_path = '/users/jess/FluxCT/' # USER INPUT - Code directory 
-plot_path = '/users/jess/FluxCT/plots/' # USER INPUT - Plot directory 
-identifiers = pd.read_csv(code_file_path + 'test_tess_list.csv') # USER INPUT - TESS ID list  
+code_file_path = 'FluxCT_AutoClean/' # USER INPUT - Code directory 
+plot_path = 'FluxCT_AutoClean/plots/' # USER INPUT - Plot directory 
+
+
+download_tasoc="./.lightkurve-cache/mastDownload/TESS/"   # Downloading Path for FITS file from TASOC
+
+
+# Path to the TASOC directory
+tasoc2_directory = "./.lightkurve-cache/mastDownload/TESS/"
+
+
+identifiers = pd.read_csv(code_file_path + 'test_star_list.csv') # USER INPUT - KIC ID list  
 identifiers = list(identifiers['id'])
 print('There are ' + str(len(identifiers)) + ' stars in the sample.') 
 
 # Creating open lists for collecting data
-tess_list = []
+star_list = []
 gaia_source_list = []
 ra_list = []
 dec_list = []
@@ -56,23 +69,102 @@ not_found = []
 # Starting time counter 
 t0 = time.time()
 a = 0
+star_type = ''
 
 # Beginning process for i in the list 
-for i in identifiers:
+for inputs in identifiers:
    
     # Printing explanatory data  
-    tess = i[4:]
-    print('\n********** TESS ' + str(tess) + ' – Star Number ' + str(a) + ' **********') 
+    numberID = inputs[4:] # Getting the number ID
+    print(f'\n********** {inputs[:3]} ' + str(numberID) + ' – Star Number ' + str(a) + ' **********') 
    
+    # Removing Used FITS file for TIC. Necessary for each iteration. 
+    if os.path.exists(tasoc2_directory):
+        # Remove the TASOC2 directory and all its contents
+        for item in os.listdir(tasoc2_directory):
+            item_path = os.path.join(tasoc2_directory, item)
+
+            # Check if it's a file or directory
+            if os.path.isfile(item_path):
+                os.remove(item_path)  # Remove the file
+            elif os.path.isdir(item_path):
+                shutil.rmtree(item_path)  # Remove the directory and its contents
+
+        print(f"All files and folders within {tasoc2_directory} have been successfully deleted.")
+    else:
+        print(f"The directory {tasoc2_directory} does not exist.")
+    
     # Searching for tpf with lightkurve
-    tpf = search_targetpixelfile('TIC ' + str(tess), author='SPOC', cadence='short').download()
-    if tpf ==None:
-        tpf = lightkurve.search_tesscut(tess).download()
-    tpf_one = tpf[0]
-    tpf_one.to_fits(plot_path + 'tess_' + str(tess) + '_fits.fits')
+
+    if inputs[:3] == 'KIC':
+        tpf = search_targetpixelfile(inputs, author='Kepler').download_all()
+        tpf_one = tpf[0]
+        star_type = 'KIC'
+        m2 = tpf_one.to_fits(star_type + str(numberID) + '_fits.fits', overwrite=True)
+        ap = tpf_one.pipeline_mask
+
+        
+
+
+    elif inputs[:3] == 'TIC':
+        tpf = search_targetpixelfile(inputs, author='SPOC').download() # Try to download from SPOC first.
+        #tpf = None # For testing purposes. Uncomment to activate test mode.
+
+        if tpf !=None:
+            print(f"Found Star {inputs} in SPOC")
+            star_type = 'TIC'
+            tpf_one = tpf[0]
+            tpf_one.to_fits(star_type + str(numberID) + '_fits.fits',overwrite=True)
+            ap = tpf_one.pipeline_mask
+            
+        if tpf ==None: # SPOC search Failed. Try to doanload from TASOC.
+            print(f"SPOC Failed for TIC {numberID}. Switching to TASOC...")
+            
+            # Aperture Mask for TASOC 
+            sr = lightkurve.search_lightcurve(inputs, author="TASOC")
+            sr1 = sr[::2]  # each target has both a "CBV" and "ENS" light curve for each sector. 
+                                # The TPF and aperture are the same for both, so you only need one.
+            download_dir=download_tasoc   # Downloading Path for FITS file from TASOC
+            sr2 = sr1.download_all(download_dir=download_dir) # directory for which you stores the downloaded files.
+
+            if(len(sr)!=0):
+                print(f"TASOC Searching Star {inputs} Complete")
+                star_type = 'TIC'
+                # Find the first subdirectory in the download directory
+                subdirectories = [d for d in os.listdir(download_dir) if os.path.isdir(os.path.join(download_dir, d))]
+                subdirectories.sort()  # Sort to get a consistent order
+                if subdirectories:
+                    first_subdir = os.path.join(download_dir, subdirectories[0])
+
+                    # Find the first FITS file in the first subdirectory
+                    fits_files = glob.glob(os.path.join(first_subdir, '**', '*.fits'), recursive=True)
+                    fits_files.sort()  # Sort to get a consistent order
+
+                    if fits_files:
+                        first_fits_file = fits_files[0]
+
+                        # Open the FITS file
+                        tess_test = fits.open(first_fits_file,memmap=False)
+
+                        # Getting Aperture Mask 
+                        tasoc_ap = tess_test[3].data
+                        ap = (tasoc_ap & 2).astype(bool)
+                        ap_size = len(ap)
+
+                        # Remember to close the file when done
+                        tess_test.close()
+
+                tpf = lightkurve.search_tesscut(inputs).download(cutout_size=ap_size)
+                tpf_one = tpf[0]
+                tpf_one.to_fits(star_type + str(numberID) + '_fits.fits',overwrite=True)
+            if(len(sr)==0):
+                print('Warning!!! Searching Failed. Star Not Found in Kepler/SPOC/TASOC')
+
+
 
     # Finding tpa
-    array = tpf_one.pipeline_mask 
+    array = ap
+
 
     # Finding the count of each pixel in the rows and columns of the mask. 
     row_count = np.count_nonzero(array, axis=1)
@@ -130,7 +222,7 @@ for i in identifiers:
     tr_y = count_y + tr_y - 1 + 0.5 
 
     # Pulling image to plot
-    tpf_data = fits.open(plot_path + 'tess_' + str(tess) + '_fits.fits')
+    tpf_data = fits.open(star_type + str(numberID) + '_fits.fits',memmap=False)
     image = tpf_data[1].data
     image = image['FLUX'][0]
     wcs = WCS(tpf_data[2].header)
@@ -140,6 +232,9 @@ for i in identifiers:
     tr = tpf_one.wcs.pixel_to_world(tr_x, tr_y)
     bl = tpf_one.wcs.pixel_to_world(bl_x, bl_y)
     br = tpf_one.wcs.pixel_to_world(br_x, br_y)
+
+    
+    tpf_data.close()
 
     # Converting the corners of the aperture mask to coordinates for Gaia
     top_left = wcs.world_to_pixel(tl)
@@ -203,7 +298,7 @@ for i in identifiers:
             plot_flux_order.append(flux[index]) 
 
     # Saving final data lists for the output file
-    tess_list.append(tess)
+    star_list.append(numberID)
     ra_list.append(plot_ra_order) 
     dec_list.append(plot_dec_order) 
     gaia_source_list.append(plot_source_order) 
@@ -220,7 +315,7 @@ for i in identifiers:
 
     # Making beautiful plot! 
     if len(companions_to_plot[0]) == 0: 
-        not_found.append(tess) 
+        not_found.append(numberID) 
     else: 
 
         # Setting figure
@@ -272,7 +367,7 @@ for i in identifiers:
         plt.xlabel('RA [hourangle]', fontsize=20)
         plt.imshow(image, origin='lower', cmap='RdPu_r', alpha=1)
         plt.imshow(array, origin='lower',  cmap='binary_r', alpha=0.2)
-        plt.title('TESS ' + str(tess), fontsize=20)
+        plt.title(f'{star_type} ' + str(numberID), fontsize=20)
 
         # Setting tick parameters 
         ax.tick_params(axis='x', labelsize=20)
@@ -280,7 +375,7 @@ for i in identifiers:
 
         # Plotting grid and saving the file
         plt.grid(axis = 'both', color='grey', ls = ':', linewidth=6)
-        plt.savefig(plot_path + str(tess) + '.png')
+        plt.savefig(plot_path +star_type +'_'+ str(numberID) + '.png')
         a = a + 1
         plt.close()
 
@@ -290,7 +385,7 @@ total = t1 - t0
 print('The total time to create these plots is ' + str(total/60) + ' minutes.') 
 
 # Saving data file
-data = zip(tess_list, ra_list, dec_list, gaia_source_list, g_mag_list, ruwe_list, flux_list) 
-header = ['tess', 'ra', 'dec', 'gaia_source_list', 'g_mag_list', 'ruwe', 'flux']
+data = zip(star_list, ra_list, dec_list, gaia_source_list, g_mag_list, ruwe_list, flux_list) 
+header = ['star', 'ra', 'dec', 'gaia_source_list', 'g_mag_list', 'ruwe', 'flux']
 df = pd.DataFrame(data=data, columns=header) 
 df.to_csv(code_file_path + 'fluxct_data.csv', index=False) 
